@@ -349,6 +349,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "candle-core"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6db8659ea87ee8197d2fc627348916cce0561330ee7ae3874e771691d3cecb2f"
+dependencies = [
+ "byteorder",
+ "gemm",
+ "half 2.4.1",
+ "memmap2 0.9.5",
+ "num-traits",
+ "num_cpus",
+ "rand",
+ "rand_distr",
+ "rayon",
+ "safetensors 0.4.5",
+ "thiserror",
+ "yoke",
+ "zip",
+]
+
+[[package]]
+name = "candle-nn"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ddce8312032760a6791d6adc9c56dc54fd7c1be38d85dcc4862f1c75228bbc7"
+dependencies = [
+ "candle-core",
+ "half 2.4.1",
+ "num-traits",
+ "rayon",
+ "safetensors 0.4.5",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "candle-transformers"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68834a0cacb7e002d1f4abfe26a7cd1237e2ba342fddcf2e30913c4edb96409d"
+dependencies = [
+ "byteorder",
+ "candle-core",
+ "candle-nn",
+ "num-traits",
+ "rand",
+ "rayon",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "tracing",
+ "wav",
+]
+
+[[package]]
 name = "cap-fs-ext"
 version = "3.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3306,17 +3361,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "synstructure"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8af7666ab7b6390ab78131fb5b0fce11d6b7a6951602017c35fa82800708971"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.90",
 ]
 
 [[package]]
