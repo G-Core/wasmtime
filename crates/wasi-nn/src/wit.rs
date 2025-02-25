@@ -246,7 +246,8 @@ impl gen::inference::HostGraphExecutionContext for WasiNnView<'_> {
         tracing::debug!("set input {name:?}: {tensor:?}");
         let tensor = tensor.clone(); // TODO: avoid copying the tensor
         let exec_context = self.table.get_mut(&exec_context)?;
-        if let Err(error) = exec_context.set_input(Id::Name(name), &tensor) {
+        let id = name.parse::<u32>().map(|v| Id::Index(v)).unwrap_or_else(|_| Id::Name(name));
+        if let Err(error) = exec_context.set_input(id, &tensor) {
             bail!(self, ErrorCode::InvalidArgument, error);
         } else {
             Ok(Ok(()))
@@ -274,7 +275,8 @@ impl gen::inference::HostGraphExecutionContext for WasiNnView<'_> {
     ) -> wasmtime::Result<Result<Resource<Tensor>, Resource<Error>>> {
         let exec_context = self.table.get_mut(&exec_context)?;
         tracing::debug!("get output {name:?}");
-        match exec_context.get_output(Id::Name(name)) {
+        let id = name.parse::<u32>().map(|v| Id::Index(v)).unwrap_or_else(|_| Id::Name(name));
+        match exec_context.get_output(id) {
             Ok(tensor) => {
                 let tensor = self.table.push(tensor)?;
                 Ok(Ok(tensor))
