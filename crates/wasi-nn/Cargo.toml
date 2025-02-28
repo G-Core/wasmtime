@@ -41,7 +41,7 @@ candle-core = { version = "0.8.4", optional = true }
 candle-transformers = { version = "0.8.4", optional = true }
 
 [target.'cfg(target_pointer_width = "64")'.dependencies]
-openvino = { version = "0.9.0", features = [
+openvino = { version = "0.6", features = [
     "runtime-linking",
 ], optional = true }
 

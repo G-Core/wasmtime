@@ -1,11 +1,11 @@
 //! Implements a `wasi-nn` [`BackendInner`] using HuggingFace via the `candle-nn` crate.
 //!
-use std::fs::File;
-use std::{io, mem};
-use std::io::{Cursor, Read};
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
+use super::{
+    BackendError, BackendExecutionContext, BackendFromDir, BackendGraph, BackendInner,
+    ExecutionContext, Graph, Id, NamedTensor,
+};
+use crate::wit::{ExecutionTarget, GraphEncoding};
+use crate::{wit, Tensor};
 use candle::Device;
 use candle_core as candle;
 use candle_core::{DType, IndexOp};
@@ -14,10 +14,13 @@ use candle_transformers::models::{
     llama2_c::{Cache, Config, Llama},
     llama2_c_weights::TransformerWeights,
 };
+use std::fs::File;
+use std::io::{Cursor, Read};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Instant;
+use std::{io, mem};
 use tracing::{trace, warn};
-use crate::{wit, Tensor};
-use super::{BackendError, BackendExecutionContext, BackendFromDir, BackendGraph, BackendInner, ExecutionContext, Graph, Id};
-use crate::wit::{ExecutionTarget, GraphEncoding};
 
 fn io_error(error: io::Error) -> BackendError {
     BackendError::BackendAccess(error.into())
@@ -32,7 +35,12 @@ enum Model {
 }
 
 impl Model {
-    fn forward(&self, xs: &candle::Tensor, pos: usize, cache: &mut Cache) -> Result<candle::Tensor, BackendError> {
+    fn forward(
+        &self,
+        xs: &candle::Tensor,
+        pos: usize,
+        cache: &mut Cache,
+    ) -> Result<candle::Tensor, BackendError> {
         match self {
             Self::Llama(l) => Ok(l.forward(xs, pos, cache).map_err(candle_error)?),
         }
@@ -107,14 +115,13 @@ impl BackendGraph for CandleGraph {
             candle::Tensor::zeros((2, 3), DType::U32, &self.device).map_err(candle_error)?;
         let vb = self.vb.clone();
         let cache = Cache::new(true, &self.config, vb.pp("rot")).map_err(candle_error)?;
-        let model =
-            Model::Llama(Llama::load(vb, self.config.clone()).map_err(candle_error)?);
+        let model = Model::Llama(Llama::load(vb, self.config.clone()).map_err(candle_error)?);
         let model = Arc::new(model);
         let context: Box<dyn BackendExecutionContext> = Box::new(CandleExecutionContext {
             device: self.device.clone(),
             model,
             tensor,
-            cache
+            cache,
         });
         trace!("init_execution_context: {:.0?}", _s.elapsed());
         Ok(context.into())
@@ -138,7 +145,7 @@ impl BackendExecutionContext for CandleExecutionContext {
                 tensor.data.len() / std::mem::size_of::<u32>(),
             )
         };
-        let index =match id {
+        let index = match id {
             Id::Index(index) => index,
             Id::Name(name) => name.parse().unwrap_or_default(),
         };
@@ -153,18 +160,43 @@ impl BackendExecutionContext for CandleExecutionContext {
         Ok(())
     }
 
-    fn compute(&mut self) -> Result<(), BackendError> {
-        let _s = Instant::now();
-        let index_pos = 0;
-        trace!("forward input: {:?}", self.tensor);
-        self.tensor = self.model.forward(&self.tensor, index_pos, &mut self.cache)?;
-        trace!("forward output: {:?} in {:.0?}", self.tensor, _s.elapsed());
-        Ok(())
+    fn compute(
+        &mut self,
+        inputs: Option<Vec<NamedTensor>>,
+    ) -> Result<Option<Vec<NamedTensor>>, BackendError> {
+        match inputs {
+            // WIT
+            Some(inputs) => {
+                let _s = Instant::now();
+                let pos = 0;
+                let input_tensor = &inputs.first().ok_or(BackendError::NoInputs)?.tensor;
+                self.set_input(Id::Index(pos), &input_tensor)?;
+                trace!("forward input: {:?}", self.tensor);
+                let tensor = self.model.forward(&&self.tensor, pos as usize, &mut self.cache)?;
+                trace!("forward output: {:?} in {:.0?}", tensor, _s.elapsed());
+                let tensor = self.get_output(Id::Index(pos))?;
+                Ok(Some(vec![NamedTensor {
+                    name: pos.to_string(),
+                    tensor,
+                }]))
+            }
+            // WITX
+            None => {
+                let _s = Instant::now();
+                let index_pos = 0;
+                trace!("forward input: {:?}", self.tensor);
+                self.tensor = self
+                    .model
+                    .forward(&self.tensor, index_pos, &mut self.cache)?;
+                trace!("forward output: {:?} in {:.0?}", self.tensor, _s.elapsed());
+                Ok(None)
+            }
+        }
     }
 
     fn get_output(&mut self, id: Id) -> Result<Tensor, BackendError> {
         trace!(?id,  ?self.tensor, "get_output");
-        let index =match id {
+        let index = match id {
             Id::Index(index) => index,
             Id::Name(name) => name.parse().unwrap_or_default(),
         };
