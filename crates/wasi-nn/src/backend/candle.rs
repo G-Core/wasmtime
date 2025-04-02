@@ -32,9 +32,9 @@ enum Model {
 }
 
 impl Model {
-    fn forward(&self, xs: &candle::Tensor, pos: usize) -> Result<candle::Tensor, BackendError> {
+    fn forward(&self, xs: &candle::Tensor, pos: usize, cache: &mut Cache) -> Result<candle::Tensor, BackendError> {
         match self {
-            Self::Llama(l) => Ok(l.forward(xs, pos).map_err(candle_error)?),
+            Self::Llama(l) => Ok(l.forward(xs, pos, cache).map_err(candle_error)?),
         }
     }
 }
@@ -108,12 +108,13 @@ impl BackendGraph for CandleGraph {
         let vb = self.vb.clone();
         let cache = Cache::new(true, &self.config, vb.pp("rot")).map_err(candle_error)?;
         let model =
-            Model::Llama(Llama::load(vb, &cache, self.config.clone()).map_err(candle_error)?);
+            Model::Llama(Llama::load(vb, self.config.clone()).map_err(candle_error)?);
         let model = Arc::new(model);
         let context: Box<dyn BackendExecutionContext> = Box::new(CandleExecutionContext {
             device: self.device.clone(),
             model,
             tensor,
+            cache
         });
         trace!("init_execution_context: {:.0?}", _s.elapsed());
         Ok(context.into())
@@ -124,6 +125,7 @@ struct CandleExecutionContext {
     device: Device,
     model: Arc<Model>,
     tensor: candle_core::Tensor,
+    cache: Cache,
 }
 
 impl BackendExecutionContext for CandleExecutionContext {
@@ -155,7 +157,7 @@ impl BackendExecutionContext for CandleExecutionContext {
         let _s = Instant::now();
         let index_pos = 0;
         trace!("forward input: {:?}", self.tensor);
-        self.tensor = self.model.forward(&self.tensor, index_pos)?;
+        self.tensor = self.model.forward(&self.tensor, index_pos, &mut self.cache)?;
         trace!("forward output: {:?} in {:.0?}", self.tensor, _s.elapsed());
         Ok(())
     }
