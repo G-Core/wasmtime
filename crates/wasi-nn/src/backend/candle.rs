@@ -168,13 +168,14 @@ impl BackendExecutionContext for CandleExecutionContext {
             // WIT
             Some(inputs) => {
                 let _s = Instant::now();
-                let pos = 0;
-                let input_tensor = &inputs.first().ok_or(BackendError::NoInputs)?.tensor;
+                let named =  inputs.first().ok_or(BackendError::NoInputs)?;
+                let pos = named.name.parse::<u32>().unwrap_or_default();
+                let input_tensor = &named.tensor;
                 self.set_input(Id::Index(pos), &input_tensor)?;
                 trace!("forward input: {:?}", self.tensor);
-                let tensor = self.model.forward(&&self.tensor, pos as usize, &mut self.cache)?;
-                trace!("forward output: {:?} in {:.0?}", tensor, _s.elapsed());
-                let tensor = self.get_output(Id::Index(pos))?;
+                self.tensor = self.model.forward(&&self.tensor, pos as usize, &mut self.cache)?;
+                trace!("forward output: {:?} in {:.0?}", self.tensor, _s.elapsed());
+                let tensor = self.get_output(Id::Index(pos + 1))?;
                 Ok(Some(vec![NamedTensor {
                     name: pos.to_string(),
                     tensor,
