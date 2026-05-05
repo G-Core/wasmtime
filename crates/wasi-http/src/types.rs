@@ -321,7 +321,7 @@ impl<T: WasiHttpView> WasiHttpView for WasiHttpImpl<T> {
 
 /// Set of [http::header::HeaderName], that are forbidden by default
 /// for requests and responses originating in the guest.
-pub const DEFAULT_FORBIDDEN_HEADERS: [http::header::HeaderName; 8] = [
+pub const DEFAULT_FORBIDDEN_HEADERS: [http::header::HeaderName; 9] = [
     hyper::header::CONNECTION,
     HeaderName::from_static("keep-alive"),
     hyper::header::PROXY_AUTHENTICATE,
@@ -329,6 +329,7 @@ pub const DEFAULT_FORBIDDEN_HEADERS: [http::header::HeaderName; 8] = [
     HeaderName::from_static("proxy-connection"),
     hyper::header::TRANSFER_ENCODING,
     hyper::header::UPGRADE,
+    hyper::header::HOST,
     HeaderName::from_static("http2-settings"),
 ];
 
