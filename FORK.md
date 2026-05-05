@@ -26,9 +26,11 @@ Upstream base: `release-36.0.0` branch of `bytecodealliance/wasmtime`.
   `2023.1` for compatibility with our deployment environment.
 
 ### `wasi-http`
-- **Allow `HOST` header** — removed `HOST` from `DEFAULT_FORBIDDEN_HEADERS` in
-  `crates/wasi-http/src/types.rs` so guests can set/forward the `Host` header
-  when making outbound HTTP requests.
+- **Prevent duplicate `HOST` header** — in
+  `crates/wasi-http/src/http_impl.rs` the outgoing handler now only injects the
+  `Host` header derived from the request authority when the guest hasn't
+  already supplied one, avoiding duplicate `Host` headers on outbound
+  requests.
 
 ### Misc
 - Refreshed `Cargo.lock` to the latest compatible dependency versions.

@@ -67,7 +67,9 @@ where
 
         let authority = req.authority.unwrap_or_else(String::new);
 
-        builder = builder.header(hyper::header::HOST, &authority);
+        if !req.headers.as_ref().contains_key(hyper::header::HOST) {
+            builder = builder.header(hyper::header::HOST, &authority);
+        }
 
         let mut uri = http::Uri::builder()
             .scheme(scheme)
