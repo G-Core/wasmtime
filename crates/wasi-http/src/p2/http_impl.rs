@@ -77,7 +77,7 @@ impl outgoing_handler::Host for WasiHttpCtxView<'_> {
 
         builder = builder.uri(uri.build().map_err(http_request_error)?);
 
-        if self.hooks.set_host_header() {
+        if self.hooks.set_host_header() && !req.headers.contains_key(http::header::HOST) {
             builder = builder.header(http::header::HOST, authority.as_str());
         }
 
