@@ -37,3 +37,8 @@ miri-wast/
 report/
 # Local SMT query cache for the ISLE verifier (see cranelift/isle/veri/verify.sh).
 cranelift/isle/veri/cache/
+
+.DS_Store
+.idea/
+crates/wasi-nn/examples/classification-example-pytorch/fixture/model.pt
+crates/wasi-nn/examples/classification-example-pytorch/libtorch/
