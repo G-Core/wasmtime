@@ -53,7 +53,7 @@ pub unsafe fn decommit_pages(iov: &[iovec]) -> io::Result<()> {
     // recent kernel.
     #[cfg(target_os = "linux")]
     unsafe {
-        if iov.len() > 1 && process_madvise::run_self(iov, libc::MADV_DONTNEED, 0)? {
+        if iov.len() > 1 && process_madvise::run_self(iov, libc::MADV_DONTNEED, 0) {
             return Ok(());
         }
     }
@@ -215,6 +215,13 @@ impl PartialEq for MemoryImageSource {
 /// requirements, and it additionally attempts to handle syscall failures to
 /// indicate that this isn't supported at all (e.g. prior to 6.14).
 ///
+/// `process_madvise` is purely an optimization: any failure here makes the
+/// caller fall back to per-region `madvise`, which is the authoritative path
+/// and the one that reports real errors. A failure must never be propagated
+/// as a decommit failure, because the pooling allocator reacts to one by
+/// discarding the memory images of the whole batch, forcing every affected
+/// slot to be remapped from scratch on its next use.
+///
 /// # Why?
 ///
 /// With `process_madvise` it's possible to inform the kernel all-at-once of a
@@ -232,13 +239,11 @@ mod process_madvise {
     static SUPPORTED: AtomicBool = AtomicBool::new(true);
     const PIDFD_SELF: libc::c_int = -10000;
 
-    pub unsafe fn run_self(
-        raw: &[iovec],
-        advice: libc::c_int,
-        flags: libc::c_int,
-    ) -> io::Result<bool> {
+    /// Returns `true` if every region in `raw` was decommitted, or `false` if
+    /// the caller must decommit the regions itself.
+    pub unsafe fn run_self(raw: &[iovec], advice: libc::c_int, flags: libc::c_int) -> bool {
         if !SUPPORTED.load(Relaxed) {
-            return Ok(false);
+            return false;
         }
         for chunk in raw.chunks(usize::try_from(libc::UIO_MAXIOV).unwrap()) {
             let expected: usize = chunk.iter().map(|iovec| iovec.iov_len).sum();
@@ -258,25 +263,82 @@ mod process_madvise {
                 // All of these are permanent failure conditions that we can't
                 // recover here, for example too old a kernel for the syscall
                 // (ENOSYS), too old a kernel for MADV_DONTNEED (EINVAL), too
-                // old a kernel for PIDFD_SELF (EINVAL), or we're not allowed to
-                // use this syscall (EPERM).
-                match err.raw_os_error() {
-                    Some(libc::ENOSYS) | Some(libc::EINVAL) | Some(libc::EPERM) => {
-                        SUPPORTED.store(false, Relaxed);
-                        return Ok(false);
-                    }
-                    _ => {}
+                // old a kernel for PIDFD_SELF (EBADF, as the kernel treats it
+                // as an ordinary invalid file descriptor; ESRCH), or we're
+                // not allowed to use this syscall (EPERM).
+                if let Some(libc::ENOSYS | libc::EINVAL | libc::EBADF | libc::ESRCH | libc::EPERM) =
+                    err.raw_os_error()
+                {
+                    SUPPORTED.store(false, Relaxed);
                 }
-                return Err(err);
+                // Anything else may be transient, so keep trying the batched
+                // path next time, but let the caller handle this batch. Any
+                // chunks already processed above get decommitted again, which
+                // is harmless for `MADV_DONTNEED`.
+                return false;
             }
 
             // If the kernel didn't actually reset everything for us then that's
             // considered a failure and this needs to be done one-by-one.
             if usize::try_from(ret).unwrap() != expected {
-                return Ok(false);
+                return false;
             }
         }
 
-        Ok(true)
+        true
+    }
+}
+
+#[cfg(all(test, feature = "pooling-allocator", target_os = "linux"))]
+mod tests {
+    use super::{decommit_pages, iovec};
+
+    /// A batched decommit must succeed and zero every region on any kernel,
+    /// including ones where `process_madvise` on `PIDFD_SELF` is unavailable
+    /// (before Linux 6.14 the syscall fails with `EBADF`).
+    #[test]
+    fn batched_decommit_zeroes_all_regions() {
+        let page = crate::runtime::vm::host_page_size();
+        let len = 4 * page;
+        unsafe {
+            let base = libc::mmap(
+                std::ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            );
+            assert_ne!(base, libc::MAP_FAILED);
+            let base = base.cast::<u8>();
+            std::ptr::write_bytes(base, 0xab, len);
+
+            // Pages 0 and 2 are decommitted; 1 and 3 must be left untouched.
+            let iov = [
+                iovec {
+                    iov_base: base.cast(),
+                    iov_len: page,
+                },
+                iovec {
+                    iov_base: base.add(2 * page).cast(),
+                    iov_len: page,
+                },
+            ];
+            decommit_pages(&iov).unwrap();
+            // A second batch exercises the path taken once the batched
+            // syscall has been marked unsupported.
+            std::ptr::write_bytes(base, 0xab, len);
+            decommit_pages(&iov).unwrap();
+
+            let bytes = std::slice::from_raw_parts(base, len);
+            for (i, chunk) in bytes.chunks(page).enumerate() {
+                let expected = if i % 2 == 0 { 0 } else { 0xab };
+                assert!(
+                    chunk.iter().all(|&b| b == expected),
+                    "page {i} not {expected:#x}"
+                );
+            }
+            assert_eq!(libc::munmap(base.cast(), len), 0);
+        }
     }
 }
