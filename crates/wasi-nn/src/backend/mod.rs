@@ -132,6 +132,8 @@ pub enum BackendError {
     NotEnoughMemory(usize),
     #[error("Unsupported tensor type: {0}")]
     UnsupportedTensorType(String),
+    #[error("Missing inputs to compute")]
+    NoInputs,
 }
 
 /// Read a file into a byte vector.
