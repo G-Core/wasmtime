@@ -6,14 +6,51 @@ use super::{
 };
 use crate::wit::{ExecutionTarget, GraphEncoding, Tensor, TensorType};
 use crate::{ExecutionContext, Graph};
-use openvino::{DeviceType, ElementType, InferenceError, SetupError, Shape, Tensor as OvTensor};
+use openvino::{
+    DeviceType, ElementType, InferenceError, RwPropertyKey, SetupError, Shape, Tensor as OvTensor,
+};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
-pub struct OpenvinoBackend(Option<openvino::Core>);
+pub struct OpenvinoBackend {
+    core: Option<openvino::Core>,
+    /// Device properties applied before every `compile_model`; see
+    /// [`OpenvinoBackend::with_properties`].
+    properties: Vec<(String, String)>,
+}
 unsafe impl Send for OpenvinoBackend {}
 unsafe impl Sync for OpenvinoBackend {}
+
+impl OpenvinoBackend {
+    /// Construct a backend that sets `properties` on the execution device
+    /// before compiling each model.
+    ///
+    /// Keys and values are the plain strings OpenVINO documents for
+    /// `ov::Core::set_property` (e.g. `NUM_STREAMS`, `INFERENCE_NUM_THREADS`,
+    /// `ENABLE_CPU_PINNING`, `PERFORMANCE_HINT`), so an embedder can forward
+    /// them from its own configuration without this crate knowing every key.
+    ///
+    /// Without any property the CPU plugin compiles with its `LATENCY` default:
+    /// a single stream whose one execution graph is guarded by a mutex held for
+    /// the whole inference, so concurrent `compute` calls on a shared graph are
+    /// serialized, and each inference is spread over every core of a socket.
+    /// A graph served from many threads wants e.g. `NUM_STREAMS` equal to the
+    /// desired concurrency and `INFERENCE_NUM_THREADS` sized to match.
+    pub fn with_properties<K, V>(properties: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        Self {
+            core: None,
+            properties: properties
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        }
+    }
+}
 
 impl BackendInner for OpenvinoBackend {
     fn encoding(&self) -> GraphEncoding {
@@ -28,8 +65,8 @@ impl BackendInner for OpenvinoBackend {
         // upon actually loading a model) because it may fail to find and load
         // the OpenVINO libraries. The laziness limits the extent of the error
         // only to wasi-nn users, not all WASI users.
-        if self.0.is_none() {
-            self.0.replace(openvino::Core::new()?);
+        if self.core.is_none() {
+            self.core.replace(openvino::Core::new()?);
         }
         // Read the guest array.
         let xml = builders[0];
@@ -44,11 +81,20 @@ impl BackendInner for OpenvinoBackend {
         // Construct OpenVINO graph structures: `model` contains the graph
         // structure, `compiled_model` can perform inference.
         let core = self
-            .0
+            .core
             .as_mut()
             .expect("openvino::Core was previously constructed");
         let model = core.read_model_from_buffer(&xml, Some(&weights_tensor))?;
-        let compiled_model = core.compile_model(&model, target.into())?;
+        // Properties are per device and only affect models compiled after they
+        // are set, so (re)apply them for this load's target right before
+        // compiling. They are not inherited from an earlier load on another
+        // device.
+        let device: DeviceType<'static> = target.into();
+        for (key, value) in &self.properties {
+            tracing::debug!("openvino: set {key}={value} on {}", device.as_ref());
+            core.set_property(&device, &RwPropertyKey::Other(key.clone().into()), value)?;
+        }
+        let compiled_model = core.compile_model(&model, device)?;
         let box_: Box<dyn BackendGraph> =
             Box::new(OpenvinoGraph(Arc::new(Mutex::new(compiled_model))));
         Ok(box_.into())

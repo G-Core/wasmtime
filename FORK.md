@@ -34,6 +34,13 @@ upstream repository.
   it uses `openvino-rs 0.11` and needs an OpenVINO runtime **>= 2025.1** (the
   bindings refuse older runtimes at load; tested upstream against 2026.1 and
   2026.4.1).
+- **OpenVINO device properties** — `OpenvinoBackend::with_properties` takes
+  plain `(key, value)` OpenVINO property strings (`NUM_STREAMS`,
+  `INFERENCE_NUM_THREADS`, `ENABLE_CPU_PINNING`, …) and sets them on the target
+  device before each `compile_model`. Without it the CPU plugin's `LATENCY`
+  default compiles one stream whose single graph is mutex-guarded per
+  inference, so a graph shared across request threads runs serialized. Not
+  upstream as of `v48.0.5`.
 
 ### `wasmtime` runtime
 - **`process_madvise` fallback** — in `crates/wasmtime/src/runtime/vm/sys/unix/vm.rs`
