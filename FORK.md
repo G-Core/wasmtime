@@ -20,20 +20,20 @@ upstream repository.
 ## Notable Changes vs. Upstream
 
 ### `wasi-nn`
-- **New Candle backend** — added a new `wasi-nn` backend based on the
-  [Candle](https://github.com/huggingface/candle) machine learning framework,
-  with initial support for the LLaMA model family
-  (`crates/wasi-nn/src/backend/candle.rs`).
-- **Candle dependency bump** — updated Candle dependencies to `v0.8.4`.
-- **Candle WIT compute** — the Candle backend accepts WIT named-tensor inputs in
-  `compute()` and reports a missing input as `BackendError::NoInputs`.
-- **Candle output tensor fix** — fixed returning of the output tensor from the
-  Candle backend.
-- **OpenVINO backend is upstream** — the fork no longer pins the legacy
-  `openvino-rs@0.6` / OpenVINO `2023.1` backend. `openvino.rs` is untouched, so
-  it uses `openvino-rs 0.11` and needs an OpenVINO runtime **>= 2025.1** (the
-  bindings refuse older runtimes at load; tested upstream against 2026.1 and
-  2026.4.1).
+- **`BackendError::NoInputs`** — new error variant, returned when a backend's
+  `compute()` is called with WIT named tensors but none were given.
+- **Candle backend lives outside the fork** — the Candle backend (LLaMA models)
+  is no longer part of this fork. It is the `wasi-nn-candle` crate in
+  `FastEdge-lib` (`crates/wasi-nn-candle`), which implements the public
+  `BackendInner` / `BackendGraph` / `BackendExecutionContext` traits from this
+  crate and relies on `BackendError::NoInputs`. The fork's own history still
+  holds the commits that added and later removed it (`git log --oneline
+  v48.0.5..HEAD -- crates/wasi-nn/src/backend/candle.rs`); they cancel out.
+- **OpenVINO backend follows upstream** — the fork no longer pins the legacy
+  `openvino-rs@0.6` / OpenVINO `2023.1` backend. `openvino.rs` is upstream's
+  apart from the device properties below, so it uses `openvino-rs 0.11` and
+  needs an OpenVINO runtime **>= 2025.1** (the bindings refuse older runtimes
+  at load; tested upstream against 2026.1 and 2026.4.1).
 - **OpenVINO device properties** — `OpenvinoBackend::with_properties` takes
   plain `(key, value)` OpenVINO property strings (`NUM_STREAMS`,
   `INFERENCE_NUM_THREADS`, `ENABLE_CPU_PINNING`, …) and sets them on the target
@@ -58,8 +58,7 @@ upstream repository.
   requests.
 
 ### Misc
-- `Cargo.lock` is upstream's, plus only what Candle needs (its crates and the
-  minimum bumps of `crc32fast`, `half`, `rayon`, `rayon-core`, `version_check`).
+- `Cargo.lock` is upstream's.
 - Added this `FORK.md` document describing the divergence from upstream.
 
 ## Updating from Upstream
@@ -85,8 +84,10 @@ All commits after the upstream base are ours. On the current branch:
 git log --oneline v48.0.5..release-48.0.0
 ```
 
-This list (Candle backend, Candle deps bump, Candle WIT compute, output tensor
-fix, `HOST` header fix, `process_madvise` fallback, `.gitignore`, `FORK.md`) is what has to be carried over.
+This list (`BackendError::NoInputs`, OpenVINO device properties, `HOST` header fix, `process_madvise` fallback, `.gitignore`, `FORK.md`) is what has to be carried over.
+The Candle commits (added, bumped, fixed, then removed) can be skipped: Candle is
+no longer part of the fork. `BackendError::NoInputs` was introduced by the Candle
+WIT-compute commit, so it must be re-applied by hand if that commit is skipped.
 
 ### 3. Create the new fork branch from the upstream release
 
@@ -116,27 +117,27 @@ git cherry-pick <first-fork-commit>^..<last-fork-commit>
 
 Conflicts are most likely in:
 
-- `crates/wasi-nn/` — `Cargo.toml` features and `src/backend/mod.rs` (backend
-  registration, `BackendError::NoInputs`). If upstream changed the `BackendInner` / `BackendExecutionContext`
-  traits, adapt `src/backend/candle.rs` accordingly.
+- `crates/wasi-nn/` — `src/backend/mod.rs` (`BackendError::NoInputs`) and
+  `src/backend/openvino.rs`. If upstream changed the `BackendInner` /
+  `BackendExecutionContext` traits, adapt `FastEdge-lib/crates/wasi-nn-candle`
+  accordingly.
 - `crates/wasi-http/src/p2/http_impl.rs` — the `Host` header injection.
 - `crates/wasmtime/src/runtime/vm/sys/unix/vm.rs` — the `process_madvise`
   fallback; drop it if upstream starts treating `EBADF` as "unsupported".
 - `Cargo.lock` — take the new base's lockfile (`git checkout --ours Cargo.lock`
-  during a cherry-pick) and let `cargo metadata` add only what Candle needs,
-  rather than merging lock hunks.
+  during a cherry-pick); the fork adds no dependencies.
 
 ### 5. Build and verify
 
 ```bash
 cargo check --workspace
-cargo build -p wasmtime-wasi-nn --features candle
+cargo build -p wasmtime-wasi-nn --features openvino
 cargo test -p wasmtime-wasi-nn
 cargo test -p wasmtime-wasi-http
 ```
 
-Run the `wasi-nn` examples in `crates/wasi-nn/examples/` against a real model
-to confirm the Candle backend still produces an output tensor.
+Build `FastEdge-lib` against the new branch (`cargo check -p wasi-nn-candle -p runtime`)
+to confirm the out-of-tree Candle backend still compiles against the traits.
 
 ### 6. Update this document and publish
 
