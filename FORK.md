@@ -14,8 +14,8 @@ upstream repository.
 ## Upstream Base
 
 - Branch: `release-48.0.0` of `bytecodealliance/wasmtime`.
-- Version: Wasmtime `48.0.5` (tag `v48.0.5`).
-- All fork-specific commits sit on top of that tag; see `git log v48.0.5..HEAD`.
+- Version: Wasmtime `48.0.10` (tag `v48.0.10`).
+- All fork-specific commits sit on top of that tag; see `git log v48.0.10..HEAD`.
 
 ## Notable Changes vs. Upstream
 
@@ -38,7 +38,7 @@ upstream repository.
   device before each `compile_model`. Without it the CPU plugin's `LATENCY`
   default compiles one stream whose single graph is mutex-guarded per
   inference, so a graph shared across request threads runs serialized. Not
-  upstream as of `v48.0.5`.
+  upstream as of `v48.0.10`.
 
 ### `wasmtime` runtime
 - **`process_madvise` fallback** — in `crates/wasmtime/src/runtime/vm/sys/unix/vm.rs`
@@ -46,7 +46,7 @@ upstream repository.
   On kernels before 6.14, `PIDFD_SELF` fails with `EBADF`; upstream treats that
   as a real error, so the pooling allocator drops the memory images of the
   whole batch and remaps every slot on its next use. The fork falls back to
-  per-region `madvise` instead. Not upstream as of `v48.0.5`.
+  per-region `madvise` instead. Not upstream as of `v48.0.10`.
 
 ### `wasi-http`
 - **Prevent duplicate `HOST` header** — in
@@ -79,7 +79,7 @@ git fetch upstream --tags
 All commits after the upstream base are ours. On the current branch:
 
 ```bash
-git log --oneline v48.0.5..release-48.0.0
+git log --oneline v48.0.10..release-48.0.0
 ```
 
 This list (`BackendError::NoInputs`, OpenVINO device properties, `HOST` header fix, `process_madvise` fallback, `.gitignore`, `FORK.md`) is what has to be carried over.
@@ -99,7 +99,7 @@ git submodule update --init --recursive
 Either rebase the old fork branch onto the new base:
 
 ```bash
-git rebase --onto release-49.0.0 v48.0.5 release-48.0.0 \
+git rebase --onto release-49.0.0 v48.0.10 release-48.0.0 \
   && git branch -f release-49.0.0 HEAD
 ```
 
